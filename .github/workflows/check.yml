@@ -121,6 +121,9 @@ jobs:
                 # Exceptions de Flutter (débordement, contrainte impossible…) : la phrase qui
                 # les décrit et la suivante, comptées, sans aucune ligne qui cite un fichier.
                 grep -A1 -E 'The following .* was thrown' /tmp/step.log | grep -vE '^--$|\.dart(:|\b)' | cut -c1-200 | sort | uniq -c | sort -rn | head -20
+                # Où le test a échoué : fichier de TEST et ligne seulement (jamais le code de
+                # l'application, ni une ligne de source).
+                grep -oE '/test/[A-Za-z0-9_/]+_test\.dart[ :][0-9]+(:[0-9]+)?' /tmp/step.log | sed 's#^/##' | sort | uniq -c | sort -rn | head -15
                 # Fichier de test qui ne se charge pas (erreur de compilation) : son nom seulement.
                 grep -oE 'Failed to load "[^"]+"' /tmp/step.log | grep -oE 'test/[^"]+' | sed 's/^/  Ne se charge pas : /' | sort -u | head -10
                 echo "  Tests en échec : $(grep -cE '\[E\]$' /tmp/step.log || true)"
