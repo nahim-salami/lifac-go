@@ -48,7 +48,8 @@ jobs:
       REF: ${{ inputs.ref || github.event.client_payload.ref || 'main' }}
       VERBOSE: ${{ inputs.verbose && 'yes' || 'no' }}
       APK: ${{ inputs.apk && 'yes' || 'no' }}
-      APP_DIR: app/${{ vars.MOBILE_DIR || '.' }}
+      # Sans « ./ » : l'envoi des APK refuse les chemins relatifs en « . » ou « .. ».
+      APP_DIR: ${{ vars.MOBILE_DIR && format('app/{0}', vars.MOBILE_DIR) || 'app' }}
 
     steps:
       - name: Réglages
