@@ -1,0 +1,10 @@
+# Garde-fou : aucun code applicatif ni clé ne doit être commité ici.
+*.dart
+pubspec.*
+*.jks
+*.keystore
+key.properties
+*.p12
+*.mobileprovision
+.env*
+app/

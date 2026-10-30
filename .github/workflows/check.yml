@@ -1,0 +1,144 @@
+# Analyse, teste et compile le code privé de LiFAC Go, sur une machine gratuite.
+#
+# ─────────────────────────────────────────────────────────────────────────────────
+# TROIS CHOSES À SAVOIR, PARCE QUE CE DÉPÔT EST PUBLIC
+#
+# 1. Les JOURNAUX d'exécution sont lisibles par tous. Une erreur Dart affiche la
+#    ligne de code fautive. D'où le mode silencieux par défaut : la sortie va dans
+#    un fichier dont seuls l'emplacement et la règle de chaque erreur sont affichés.
+#    Le mode bavard existe, à la demande, en connaissance de cause.
+# 2. Les ARTEFACTS sont téléchargeables par tous. L'APK n'est donc produit que si on
+#    le demande, et un APK se décompile.
+# 3. Qui peut MODIFIER ce fichier peut lire le code privé. La protection est la
+#    branche protégée et la revue, pas un réglage technique. Aucun déclencheur
+#    `pull_request` : une contribution extérieure ne lance jamais ce workflow.
+# ─────────────────────────────────────────────────────────────────────────────────
+
+name: Vérifier
+
+on:
+  repository_dispatch:
+    types: [check]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branche ou étiquette du dépôt privé
+        default: main
+      verbose:
+        description: Journal complet (il devient public)
+        type: boolean
+        default: false
+      apk:
+        description: Produire un APK installable (téléchargeable par tous)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REF: ${{ inputs.ref || github.event.client_payload.ref || 'main' }}
+      VERBOSE: ${{ inputs.verbose && 'yes' || 'no' }}
+      APK: ${{ inputs.apk && 'yes' || 'no' }}
+      APP_DIR: app/${{ vars.MOBILE_DIR || '.' }}
+
+    steps:
+      - name: Réglages
+        env:
+          REPO: ${{ vars.MOBILE_REPO }}
+          TOKEN: ${{ secrets.MOBILE_REPO_TOKEN }}
+        run: |
+          test -n "$REPO" || { echo "::error::Variable MOBILE_REPO manquante (dépôt privé du code)."; exit 1; }
+          test -n "$TOKEN" || { echo "::error::Secret MOBILE_REPO_TOKEN manquant (jeton en lecture seule)."; exit 1; }
+
+      - name: Code privé
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.MOBILE_REPO }}
+          token: ${{ secrets.MOBILE_REPO_TOKEN }}
+          ref: ${{ env.REF }}
+          path: app
+          persist-credentials: false
+          lfs: true
+
+      # Version de Flutter : celle que fixe le projet (.fvmrc) quand il en a une.
+      - uses: subosito/flutter-action@v2
+        if: hashFiles(format('{0}/.fvmrc', env.APP_DIR)) != ''
+        with:
+          flutter-version-file: ${{ env.APP_DIR }}/.fvmrc
+          channel: stable
+          cache: true
+
+      - uses: subosito/flutter-action@v2
+        if: hashFiles(format('{0}/.fvmrc', env.APP_DIR)) == ''
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyse et tests
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -o pipefail
+          step() {
+            local label="$1"; shift
+            echo "── $label"
+            if [ "$VERBOSE" = "yes" ]; then
+              "$@"
+            elif ! "$@" > /tmp/step.log 2>&1; then
+              echo "::error::$label a échoué."
+              # Les messages de Dart citent le code source : ils ne sortent jamais
+              # d'ici. On publie l'EMPLACEMENT et la RÈGLE (« lib/x.dart:12 ·
+              # unused_import »), qui disent la structure du projet, pas son contenu.
+              if grep -qF '•' /tmp/step.log; then
+                awk -F '•' '/•/ {
+                  gsub(/^[ \t]+|[ \t]+$/, "", $3);
+                  gsub(/^[ \t]+|[ \t]+$/, "", $4);
+                  if ($4 != "") print "  " $3 " · " $4;
+                }' /tmp/step.log | sort -u | head -40
+              else
+                echo "  Lignes en erreur : $(grep -ciE '(^|[^a-z])error' /tmp/step.log || true)"
+                echo "  Relancez avec « Journal complet » pour voir pourquoi (le journal devient public)."
+              fi
+              return 1
+            fi
+          }
+          step "Dépendances" flutter pub get
+
+          echo "── Format (consultatif)"
+          dart format --output=none --set-exit-if-changed lib test > /dev/null 2>&1 \
+            || echo "::warning::Le format diffère de dart format."
+
+          step "Analyse" flutter analyze --no-fatal-infos
+          if [ -d test ]; then step "Tests" flutter test; else echo "── Tests : aucun dossier test/"; fi
+
+          # Sans demande d'APK, une compilation de débogage suffit à dire que le code
+          # se compile. Aucune clé de signature ici : l'APK demandé est signé avec la
+          # clé de débogage, pour essayer sur un téléphone seulement.
+          if [ "$APK" = "yes" ]; then
+            step "Compilation" flutter build apk --release --split-per-abi
+          else
+            step "Compilation" flutter build apk --debug
+          fi
+          echo "Tout est vert."
+
+      - name: APK
+        if: inputs.apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifac-go-${{ github.run_number }}
+          path: |
+            ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          retention-days: 3
+
+      - name: Effacer le code
+        if: always()
+        run: rm -rf app /tmp/step.log

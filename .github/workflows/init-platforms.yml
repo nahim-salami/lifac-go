@@ -1,0 +1,65 @@
+# Génère les dossiers de plateforme d'un projet Flutter neuf.
+#
+# `android/` et `ios/` sont produits par `flutter create`. Rien n'étant installé sur le
+# poste de travail, c'est cette machine qui les fabrique.
+#
+# CE WORKFLOW N'ACCÈDE À RIEN DE PRIVÉ : `flutter create` n'a besoin que d'un nom de
+# projet et d'un identifiant d'organisation. Le résultat est un échafaudage identique
+# pour tout le monde, donc le déposer en artefact public ne révèle rien.
+
+name: Initialiser les plateformes
+
+on:
+  workflow_dispatch:
+    inputs:
+      org:
+        # L'identifiant d'application (org + nom) ne se change plus une fois publié
+        # dans un magasin : le choisir avant la première publication.
+        description: Identifiant d'organisation (ex. org.lifac)
+        required: true
+      flutter:
+        description: Version de Flutter
+        default: "3.35.0"
+      platforms:
+        description: Plateformes
+        type: choice
+        default: "android,ios"
+        options: ["android,ios", "android", "ios"]
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ inputs.flutter }}
+          channel: stable
+          cache: true
+
+      - name: Créer le projet
+        env:
+          ORG: ${{ inputs.org }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          mkdir -p scaffold && cd scaffold
+          flutter create --org "$ORG" --project-name lifac_go --platforms="$PLATFORMS" --no-pub .
+          # On ne garde que ce qui manque au dépôt privé.
+          mkdir -p ../out
+          for d in android ios; do
+            [ -d "$d" ] && cp -r "$d" ../out/
+          done
+          cp .metadata ../out/ 2>/dev/null || true
+          find ../out -type f | wc -l | sed 's/^/Fichiers produits : /'
+
+      - name: Récupérer les dossiers
+        uses: actions/upload-artifact@v4
+        with:
+          name: platforms
+          path: out
+          retention-days: 7
