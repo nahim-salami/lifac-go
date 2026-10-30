@@ -99,7 +99,12 @@ jobs:
               # Les messages de Dart citent le code source : ils ne sortent jamais
               # d'ici. On publie l'EMPLACEMENT et la RÈGLE (« lib/x.dart:12 ·
               # unused_import »), qui disent la structure du projet, pas son contenu.
-              if grep -qF '•' /tmp/step.log; then
+              if grep -q 'What went wrong' /tmp/step.log; then
+                # Erreur Gradle (signature, SDK, dépendances) : ce bloc parle de la
+                # configuration Android, pas du code. Les lignes qui citent un fichier
+                # Dart restent dans le fichier.
+                grep -A12 'What went wrong' /tmp/step.log | grep -vE '\.dart(:|\b)' | head -30
+              elif grep -qF '•' /tmp/step.log; then
                 awk -F '•' '/•/ {
                   gsub(/^[ \t]+|[ \t]+$/, "", $3);
                   gsub(/^[ \t]+|[ \t]+$/, "", $4);
