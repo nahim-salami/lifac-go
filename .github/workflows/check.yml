@@ -140,7 +140,7 @@ jobs:
             || echo "::warning::Le format diffère de dart format."
 
           step "Analyse" flutter analyze --no-fatal-infos
-          if [ -d test ]; then step "Tests" flutter test; else echo "── Tests : aucun dossier test/"; fi
+          if [ -d test ]; then step "Tests" flutter test --reporter expanded; else echo "── Tests : aucun dossier test/"; fi
 
           # Sans demande d'APK, une compilation de débogage suffit à dire que le code
           # se compile. Aucune clé de signature ici : l'APK demandé est signé avec la
