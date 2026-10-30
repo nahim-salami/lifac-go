@@ -111,12 +111,15 @@ jobs:
                 # configuration Android, pas du code. Les lignes qui citent un fichier
                 # Dart restent dans le fichier.
                 grep -A12 'What went wrong' /tmp/step.log | grep -vE '\.dart(:|\b)' | head -30
-              elif grep -q 'Some tests failed' /tmp/step.log; then
+              elif grep -qE '\[E\]|Failed to load|Some tests failed' /tmp/step.log; then
                 # Tests en échec : le NOM de chaque test et ses lignes « Expected / Actual »
                 # (textes d'écran attendus et trouvés). Les traces, qui citent les fichiers
                 # et parfois le code, restent dans le fichier.
                 grep -E '\[E\]$' /tmp/step.log | sed -E 's/^[0-9:]+ \+[0-9]+( ~[0-9]+)? -[0-9]+: //' | sort -u | head -20
                 grep -E '^\s*(Expected|Actual|Which):' /tmp/step.log | grep -vE '\.dart(:|\b)' | cut -c1-200 | head -30
+                # Fichier de test qui ne se charge pas (erreur de compilation) : son nom seulement.
+                grep -oE 'Failed to load "[^"]+"' /tmp/step.log | grep -oE 'test/[^"]+' | sed 's/^/  Ne se charge pas : /' | sort -u | head -10
+                echo "  Tests en échec : $(grep -cE '\[E\]$' /tmp/step.log || true)"
               elif grep -qF '•' /tmp/step.log; then
                 awk -F '•' '/•/ {
                   gsub(/^[ \t]+|[ \t]+$/, "", $3);
