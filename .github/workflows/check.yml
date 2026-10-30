@@ -69,17 +69,19 @@ jobs:
           persist-credentials: false
           lfs: true
 
-      # Version de Flutter : celle que fixe le projet (.fvmrc) quand il en a une.
-      - uses: subosito/flutter-action@v2
-        if: hashFiles(format('{0}/.fvmrc', env.APP_DIR)) != ''
-        with:
-          flutter-version-file: ${{ env.APP_DIR }}/.fvmrc
-          channel: stable
-          cache: true
+      # Version de Flutter : celle que fixe le projet (.fvmrc) quand il en a une, sinon la
+      # dernière stable. (hashFiles refuse un chemin en « app/./ », d'où la lecture directe.)
+      - name: Version de Flutter
+        id: fv
+        run: |
+          V=any
+          if [ -f "$APP_DIR/.fvmrc" ]; then V=$(jq -r '.flutter // "any"' "$APP_DIR/.fvmrc"); fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Flutter $V"
 
       - uses: subosito/flutter-action@v2
-        if: hashFiles(format('{0}/.fvmrc', env.APP_DIR)) == ''
         with:
+          flutter-version: ${{ steps.fv.outputs.version }}
           channel: stable
           cache: true
 
