@@ -1,0 +1,151 @@
+# Publication de LiFAC Go : APK de production signés, déposés sur la page Releases de ce dépôt.
+#
+# Le code vient du dépôt privé et n'est jamais publié : seuls les APK compilés le sont. Les
+# clés (signature Android, configuration Firebase) sont des secrets de ce dépôt, écrites le
+# temps de la compilation puis effacées. Le journal ne montre aucune sortie de compilation :
+# en cas d'échec, lancer « Contrôle » (check.yml) pour savoir pourquoi.
+#
+# Secrets à créer (Settings → Secrets and variables → Actions) :
+#   ANDROID_KEYSTORE_BASE64     la clé de signature (.jks) encodée en base64
+#   ANDROID_KEYSTORE_PASSWORD   son mot de passe
+#   ANDROID_KEY_ALIAS           l'alias de la clé (ex. lifac-go)
+#   ANDROID_KEY_PASSWORD        le mot de passe de la clé (souvent le même)
+#   GOOGLE_SERVICES_JSON_BASE64 google-services.json de Firebase, en base64 (notifications push)
+name: Publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version publiée (ex. 1.0.0)
+        required: true
+      ref:
+        description: Branche ou étiquette du dépôt privé
+        default: main
+      prerelease:
+        description: Version d'essai (pré-publication)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      VERSION: ${{ inputs.version }}
+      APP_DIR: ${{ vars.MOBILE_DIR && format('app/{0}', vars.MOBILE_DIR) || 'app' }}
+
+    steps:
+      - name: Réglages
+        env:
+          REPO: ${{ vars.MOBILE_REPO }}
+          TOKEN: ${{ secrets.MOBILE_REPO_TOKEN }}
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          FIREBASE: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::Version attendue au format 1.2.3."; exit 1; }
+          test -n "$REPO" || { echo "::error::Variable MOBILE_REPO manquante."; exit 1; }
+          test -n "$TOKEN" || { echo "::error::Secret MOBILE_REPO_TOKEN manquant."; exit 1; }
+          # Jamais d'APK de production signé avec la clé de débogage.
+          for s in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            test -n "${!s}" || { echo "::error::Secret de signature manquant ($s) : voir l'en-tête de ce fichier."; exit 1; }
+          done
+          test -n "$FIREBASE" || echo "::warning::GOOGLE_SERVICES_JSON_BASE64 absent : APK sans notifications push."
+          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::La version v$VERSION existe déjà."; exit 1
+          fi
+        shell: bash
+
+      - name: Code privé
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ vars.MOBILE_REPO }}
+          token: ${{ secrets.MOBILE_REPO_TOKEN }}
+          ref: ${{ inputs.ref }}
+          path: app
+          persist-credentials: false
+          lfs: true
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Version de Flutter
+        id: fv
+        run: |
+          V=any
+          if [ -f "$APP_DIR/.fvmrc" ]; then V=$(jq -r '.flutter // "any"' "$APP_DIR/.fvmrc"); fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fv.outputs.version }}
+          channel: stable
+          cache: true
+
+      - name: Clés
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          FIREBASE: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          umask 077
+          echo "$KEYSTORE" | base64 -d > android/app/release-key.jks
+          {
+            echo "storeFile=release-key.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+          if [ -n "$FIREBASE" ]; then echo "$FIREBASE" | base64 -d > android/app/google-services.json; fi
+
+      - name: Tests et compilation
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -o pipefail
+          run() {
+            echo "── $1"; shift
+            "$@" > /tmp/step.log 2>&1 || { echo "::error::Échec. Lancez « Contrôle » sur la même branche pour voir pourquoi."; exit 1; }
+          }
+          run "Dépendances" flutter pub get
+          run "Tests" flutter test
+          run "Compilation" flutter build apk --release --split-per-abi --build-name "$VERSION" --build-number "${{ github.run_number }}"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          for abi in arm64-v8a armeabi-v7a; do
+            cp "build/app/outputs/flutter-apk/app-$abi-release.apk" "$GITHUB_WORKSPACE/out/lifac-go-$VERSION-$abi.apk"
+          done
+          ls -la "$GITHUB_WORKSPACE/out" | awk '{print $5, $9}'
+
+      - name: Publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRE: ${{ inputs.prerelease && '--prerelease' || '' }}
+        run: |
+          cat > /tmp/notes.md <<EOF
+          Application LiFAC Go $VERSION.
+
+          - **lifac-go-$VERSION-arm64-v8a.apk** : la plupart des téléphones Android récents (à prendre d'abord).
+          - **lifac-go-$VERSION-armeabi-v7a.apk** : téléphones plus anciens, si le premier refuse de s'installer.
+
+          Installation : ouvrir le fichier sur le téléphone et autoriser l'installation depuis cette source.
+          EOF
+          gh release create "v$VERSION" out/*.apk -R "$GITHUB_REPOSITORY" --title "LiFAC Go $VERSION" --notes-file /tmp/notes.md $PRE
+
+      - name: Effacer le code et les clés
+        if: always()
+        run: rm -rf app out /tmp/step.log /tmp/notes.md
