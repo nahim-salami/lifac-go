@@ -111,21 +111,21 @@ jobs:
                 # Erreur Gradle (signature, SDK, dépendances) : ce bloc parle de la
                 # configuration Android, pas du code. Les lignes qui citent un fichier
                 # Dart restent dans le fichier.
-                grep -A12 'What went wrong' /tmp/step.log | grep -vE '\.dart(:|\b)' | head -30
+                grep -A12 'What went wrong' /tmp/step.log | grep -vE '\.dart(:|\b)' | head -30 || true
               elif grep -qE '\[E\]|Failed to load|Some tests failed' /tmp/step.log; then
                 # Tests en échec : le NOM de chaque test et ses lignes « Expected / Actual »
                 # (textes d'écran attendus et trouvés). Les traces, qui citent les fichiers
                 # et parfois le code, restent dans le fichier.
-                grep -E '\[E\]$' /tmp/step.log | sed -E 's/^[0-9:]+ \+[0-9]+( ~[0-9]+)? -[0-9]+: //; s#^.*/(test/)#\1#' | sort -u | head -20
-                grep -E '^\s*(Expected|Actual|Which):' /tmp/step.log | grep -vE '\.dart(:|\b)' | cut -c1-200 | head -30
+                grep -E '\[E\]$' /tmp/step.log | sed -E 's/^[0-9:]+ \+[0-9]+( ~[0-9]+)? -[0-9]+: //; s#^.*/(test/)#\1#' | sort -u | head -20 || true
+                grep -E '^\s*(Expected|Actual|Which):' /tmp/step.log | grep -vE '\.dart(:|\b)' | cut -c1-200 | head -30 || true
                 # Exceptions de Flutter (débordement, contrainte impossible…) : la phrase qui
                 # les décrit et la suivante, comptées, sans aucune ligne qui cite un fichier.
-                grep -A1 -E 'The following .* was thrown' /tmp/step.log | grep -vE '^--$|\.dart(:|\b)' | cut -c1-200 | sort | uniq -c | sort -rn | head -20
+                grep -A1 -E 'The following .* was thrown' /tmp/step.log | grep -vE '^--$|\.dart(:|\b)' | cut -c1-200 | sort | uniq -c | sort -rn | head -20 || true
                 # Où le test a échoué : fichier de TEST et ligne seulement (jamais le code de
                 # l'application, ni une ligne de source).
-                grep -oE '/test/[A-Za-z0-9_/]+_test\.dart[ :][0-9]+(:[0-9]+)?' /tmp/step.log | sed 's#^/##' | sort | uniq -c | sort -rn | head -15
+                grep -oE '/test/[A-Za-z0-9_/]+_test\.dart[ :][0-9]+(:[0-9]+)?' /tmp/step.log | sed 's#^/##' | sort | uniq -c | sort -rn | head -15 || true
                 # Fichier de test qui ne se charge pas (erreur de compilation) : son nom seulement.
-                grep -oE 'Failed to load "[^"]+"' /tmp/step.log | grep -oE 'test/[^"]+' | sed 's/^/  Ne se charge pas : /' | sort -u | head -10
+                grep -oE 'Failed to load "[^"]+"' /tmp/step.log | grep -oE 'test/[^"]+' | sed 's/^/  Ne se charge pas : /' | sort -u | head -10 || true
                 echo "  Tests en échec : $(grep -cE '\[E\]$' /tmp/step.log || true)"
               elif grep -qF '•' /tmp/step.log; then
                 awk -F '•' '/•/ {
